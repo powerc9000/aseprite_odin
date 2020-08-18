@@ -1,5 +1,9 @@
 package aseprite;
 
+import "core:os";
+import "core:mem";
+import "core:fmt";
+
 ASE_BYTE :: u8;
 ASE_WORD :: u16le;
 ASE_SHORT :: i16le;
@@ -121,6 +125,20 @@ ASE_LAYER_CHUNK :: struct #packed {
 	layerName: ASE_STRING
 };
 
+ASE_LAYER_CHUNK_TYPE :: enum ASE_WORD {
+	Normal,
+	Group
+}
+ASE_LAYER_CHUNK_FLAGS_INFO :: enum ASE_WORD {
+	Visible,
+	Editable,
+	Locked,
+	Background,
+	PreferLinkedCels, 
+	Collapsed,
+	ReferenceLayer
+}
+ASE_LAYER_CHUNK_FLAGS :: bit_set[ASE_LAYER_CHUNK_FLAGS_INFO; ASE_WORD];
 
 CEL_CHUNK_HEADER :: struct #packed {
 	index: ASE_WORD,
@@ -198,4 +216,109 @@ TAGS_CHUNK_DATA :: struct #packed {
 	pad: ASE_BYTE,
 	name: ASE_STRING
 }
+
+PALETTE_CHUNK_HEADER :: struct #packed {
+	size: ASE_DWORD,
+	firstIndex: ASE_DWORD,
+	lastIndex: ASE_DWORD,
+	reserved: [8]ASE_BYTE
+};
+
+PALLET_CHUNK_DATA :: struct #packed {
+	flags: ASE_WORD,
+	red: ASE_BYTE,
+	green: ASE_BYTE,
+	blue: ASE_BYTE,
+	alpha: ASE_BYTE,
+};
+
+USER_DATA_CHUNK :: struct #packed {
+	flags: ASE_DWORD
+};
+
+USER_DATA_CHUNK_FLAGS_BIT_1 :: ASE_STRING;
+USER_DATA_CHUNK_FLAGS_BIT_2 :: struct #packed {
+	red: ASE_BYTE,
+	green: ASE_BYTE,
+	blue: ASE_BYTE,
+	alpha: ASE_BYTE
+}
+
+SLICE_CHUNK_HEADER :: struct #packed {
+	total: ASE_DWORD,
+	flags: ASE_DWORD,
+	reserved: ASE_DWORD,
+	name: ASE_STRING
+};
+
+SLICE_CHUNK_DATA :: struct #packed {
+	frameNumber: ASE_DWORD,
+	x: ASE_LONG,
+	y: ASE_LONG,
+	width: ASE_DWORD,
+	height: ASE_DWORD
+}
+
+SLICE_CHUNK_DATA_BIT_1 :: struct #packed {
+	centerX: ASE_LONG,
+	centerY: ASE_LONG,
+	centerWidth: ASE_DWORD,
+	centerHeight: ASE_DWORD
+};
+
+SLICE_CHUNK_DATA_BIT_2 :: struct #packed {
+	pivotX: ASE_LONG,
+	pivotY: ASE_LONG
+}
+
+read_file :: proc(path: string) {
+	data,_ := os.read_entire_file(path);
+	current := 0;
+	header := ASE_HEADER{};
+	frame := ASE_FRAME_HEADER{};
+	read_from_buffer(mem.ptr_to_bytes(&header), data, &current);
+	fmt.println(header);
+	for _ in 0..<header.frames {
+		old := current;
+		read_from_buffer(mem.ptr_to_bytes(&frame), data, &current);
+		fmt.println(frame);
+		for _ in 0..<frame.totalChunks {
+			chunk := ASE_CHUNK_HEADER{};
+			read_from_buffer(mem.ptr_to_bytes(&chunk), data, &current);
+			fmt.println(chunk);
+			type := ASE_CHUNK_TYPES(chunk.type);
+			fmt.println(current);
+			#partial switch type {
+				case .LAYER: {
+					old2 := current;
+					layerData := ASE_LAYER_CHUNK{};
+					fmt.println("LAYER CHUNK");
+					read_from_buffer(mem.ptr_to_bytes(&layerData), data, &current);
+					fmt.println(transmute(ASE_LAYER_CHUNK_FLAGS)layerData.flags, layerData.flags, ASE_LAYER_CHUNK_TYPE(layerData.type));
+
+					current = old2 + int(chunk.size - size_of(chunk));
+				}
+				case:
+					current += int(chunk.size - size_of(chunk));
+			}
+		}
+
+		current = old + int(frame.totalBytes);
+	}
+	fmt.println("done");
+}
+
+read_from_buffer :: proc(dest: []byte, source: []byte, current_pos: ^int) -> bool {
+	if len(source) < current_pos^ + len(dest) {
+		return false;
+	}
+	copy(dest, source[current_pos^:current_pos^ + len(dest)]);
+	current_pos^ += len(dest);
+
+	return true;
+}
+
+
+
+
 
