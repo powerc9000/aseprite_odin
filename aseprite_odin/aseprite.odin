@@ -3,6 +3,16 @@ package aseprite;
 import "core:os";
 import "core:mem";
 import "core:fmt";
+import "core:strings"
+import "core:c";
+import raylib "../raylib_odin/raylib_defs";
+
+foreign import miniz "../clibs/miniz.o";
+
+foreign miniz {
+	tinfl_decompress_mem_to_heap :: proc(rawptr, c.size_t, ^c.size_t, c.int) -> rawptr ---;
+	mz_free :: proc(rawptr) ---;
+}
 
 ASE_BYTE :: u8;
 ASE_WORD :: u16le;
@@ -122,8 +132,10 @@ ASE_LAYER_CHUNK :: struct #packed {
 	blendMode: ASE_WORD,
 	opacity: ASE_BYTE,
 	reserved: [3]ASE_BYTE,
-	layerName: ASE_STRING
+	nameLen: ASE_WORD
 };
+
+ASE_LAYER_CHUNK_NAME :: ASE_STRING;
 
 ASE_LAYER_CHUNK_TYPE :: enum ASE_WORD {
 	Normal,
@@ -271,6 +283,31 @@ SLICE_CHUNK_DATA_BIT_2 :: struct #packed {
 	pivotY: ASE_LONG
 }
 
+Ase_Layer :: struct {
+	index: int,
+	name: string,
+	groupPath: []string
+}
+
+Ase_Cel :: struct {
+	layerIndex: int,
+	x: int,
+	y: int,
+	opacity: f32,
+	data: []u8
+}
+
+Ase_Frame :: struct {
+	duration: int,
+	cels: []Ase_Cel
+}
+
+Ase_Document :: struct {
+	header: ASE_HEADER,
+	layers: []Ase_Layer,
+	frames: []Ase_Frame
+}
+
 read_file :: proc(path: string) {
 	data,_ := os.read_entire_file(path);
 	current := 0;
@@ -287,17 +324,57 @@ read_file :: proc(path: string) {
 			read_from_buffer(mem.ptr_to_bytes(&chunk), data, &current);
 			fmt.println(chunk);
 			type := ASE_CHUNK_TYPES(chunk.type);
-			fmt.println(current);
 			#partial switch type {
 				case .LAYER: {
 					old2 := current;
 					layerData := ASE_LAYER_CHUNK{};
-					fmt.println("LAYER CHUNK");
 					read_from_buffer(mem.ptr_to_bytes(&layerData), data, &current);
+					layerName := make([]ASE_BYTE, layerData.nameLen);
+					read_from_buffer(layerName, data, &current);
+					fmt.println("Layer Chunk", int(layerData.nameLen));
+					fmt.println(strings.string_from_ptr(&layerName[0], int(layerData.nameLen)));
 					fmt.println(transmute(ASE_LAYER_CHUNK_FLAGS)layerData.flags, layerData.flags, ASE_LAYER_CHUNK_TYPE(layerData.type));
 
 					current = old2 + int(chunk.size - size_of(chunk));
 				}
+				case .CEL:{
+					celHeader := CEL_CHUNK_HEADER{};
+					read_from_buffer(mem.ptr_to_bytes(&celHeader), data, &current);
+					if celHeader.type == 2 {
+						width := read_type(ASE_WORD, data, &current);
+						height := read_type(ASE_WORD, data, &current);
+						fmt.println("w, h", width, height);
+						leftOver := int(chunk.size - size_of(chunk) - size_of(celHeader) - size_of(width) * 2);
+						fmt.println(chunk.size, leftOver);
+						source := data[current:current + leftOver];
+						outLen : c.size_t;
+						decompressed := tinfl_decompress_mem_to_heap(&source[0], c.size_t(leftOver), &outLen, 1);
+						cellData := make([]byte, int(outLen));
+						mem.copy(&cellData[0], decompressed, int(outLen));
+						mz_free(decompressed);
+						fmt.println("calling raylib");
+						fmt.println(len(cellData), outLen, width * height * 4);
+						image := raylib.LoadImagePro(&cellData[0], c.int(width), c.int(height), raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8);
+						raylib.export_image(image, fmt.tprintf("{0}.png", outLen));
+						fmt.println(image);
+						fmt.println("saved as", fmt.tprintf("{0}.png", outLen), outLen);
+						fmt.println("bytes in data", leftOver);
+					}
+					fmt.println("CEL HEADER");
+					fmt.println(celHeader);
+				}
+				/*
+				case .CEL_EXTRA,
+				case .OLD_PALETTE:
+				case .OLD_PALETTE_2:
+				case .COLOR_PROFILE:
+				case .MASK:
+				case .TAGS:
+				case .PALETTE:
+				case .USER_DATA: 
+				case .SLICE:
+				case .PATH: //never used
+				*/
 				case:
 					current += int(chunk.size - size_of(chunk));
 			}
@@ -316,6 +393,14 @@ read_from_buffer :: proc(dest: []byte, source: []byte, current_pos: ^int) -> boo
 	current_pos^ += len(dest);
 
 	return true;
+}
+
+read_type :: proc($T: typeid, data: []byte, current_pos: ^int) -> T {
+	type: T;
+	
+	read_from_buffer(mem.ptr_to_bytes(&type), data, current_pos);
+
+	return type;
 }
 
 
