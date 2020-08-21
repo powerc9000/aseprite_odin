@@ -190,7 +190,7 @@ COLOR_PROFILE_TYPE :: enum ASE_WORD {
 	Embedded = 2
 }
 
-COLOR_PROFILE_CUNK :: struct #packed {
+COLOR_PROFILE_CHUNK :: struct #packed {
 	type: COLOR_PROFILE_TYPE,
 	flags: ASE_WORD,
 	fixedGamma: ASE_FIXED,
@@ -299,47 +299,73 @@ Ase_Cel :: struct {
 
 Ase_Frame :: struct {
 	duration: int,
-	cels: []Ase_Cel
+	cels: [dynamic]Ase_Cel,
+	tags: []int
+}
+
+Ase_Tag :: struct {
+	name: string,
+	fromFrame: int,
+	toFrame: int
 }
 
 Ase_Document :: struct {
+	width: int,
+	height: int,
 	header: ASE_HEADER,
-	layers: []Ase_Layer,
-	frames: []Ase_Frame
+	layers: [dynamic]Ase_Layer,
+	frames: [dynamic]Ase_Frame,
+	tags: [dynamic]Ase_Tag
 }
 
 read_file :: proc(path: string) {
 	data,_ := os.read_entire_file(path);
+	document : Ase_Document;
 	current := 0;
 	header := ASE_HEADER{};
 	frame := ASE_FRAME_HEADER{};
 	read_from_buffer(mem.ptr_to_bytes(&header), data, &current);
+	document.width = int(header.width);
+	document.height = int(header.height);
 	fmt.println(header);
-	for _ in 0..<header.frames {
+	for frameIndex in 0..<header.frames {
 		old := current;
 		read_from_buffer(mem.ptr_to_bytes(&frame), data, &current);
 		fmt.println(frame);
 		for _ in 0..<frame.totalChunks {
+			chunkStart := current;
 			chunk := ASE_CHUNK_HEADER{};
 			read_from_buffer(mem.ptr_to_bytes(&chunk), data, &current);
-			fmt.println(chunk);
 			type := ASE_CHUNK_TYPES(chunk.type);
+			fmt.println(chunk);
+			layerIndex := 0;
 			#partial switch type {
 				case .LAYER: {
-					old2 := current;
 					layerData := ASE_LAYER_CHUNK{};
 					read_from_buffer(mem.ptr_to_bytes(&layerData), data, &current);
 					layerName := make([]ASE_BYTE, layerData.nameLen);
 					read_from_buffer(layerName, data, &current);
 					fmt.println("Layer Chunk", int(layerData.nameLen));
-					fmt.println(strings.string_from_ptr(&layerName[0], int(layerData.nameLen)));
+					name := strings.clone(strings.string_from_ptr(&layerName[0], int(layerData.nameLen)));
 					fmt.println(transmute(ASE_LAYER_CHUNK_FLAGS)layerData.flags, layerData.flags, ASE_LAYER_CHUNK_TYPE(layerData.type));
 
-					current = old2 + int(chunk.size - size_of(chunk));
+					layer : Ase_Layer = {
+						index=layerIndex,
+						name=name,
+					};
+
+					append(&document.layers, layer);
+
+					layerIndex += 1;
+
 				}
 				case .CEL:{
 					celHeader := CEL_CHUNK_HEADER{};
 					read_from_buffer(mem.ptr_to_bytes(&celHeader), data, &current);
+					x := f32(celHeader.x);
+					y := f32(celHeader.y);
+					fmt.println("CEL HEADER");
+					fmt.println(celHeader);
 					if celHeader.type == 2 {
 						width := read_type(ASE_WORD, data, &current);
 						height := read_type(ASE_WORD, data, &current);
@@ -347,27 +373,30 @@ read_file :: proc(path: string) {
 						leftOver := int(chunk.size - size_of(chunk) - size_of(celHeader) - size_of(width) * 2);
 						fmt.println(chunk.size, leftOver);
 						source := data[current:current + leftOver];
-						outLen : c.size_t;
-						decompressed := tinfl_decompress_mem_to_heap(&source[0], c.size_t(leftOver), &outLen, 1);
-						cellData := make([]byte, int(outLen));
-						mem.copy(&cellData[0], decompressed, int(outLen));
-						mz_free(decompressed);
+						cellData := raylib.decode_zlib(source);
+						fmt.println("total size", len(cellData));
 						fmt.println("calling raylib");
-						fmt.println(len(cellData), outLen, width * height * 4);
+						parentImage := raylib.GenImageColor(cast(c.int)document.width, cast(c.int)document.height, raylib.COLOR_TRANSPARENT);
 						image := raylib.LoadImagePro(&cellData[0], c.int(width), c.int(height), raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8);
-						raylib.export_image(image, fmt.tprintf("{0}.png", outLen));
-						fmt.println(image);
-						fmt.println("saved as", fmt.tprintf("{0}.png", outLen), outLen);
+						src: raylib.Rectangle = {{0,0}, f32(width), f32(height)};
+						dest: raylib.Rectangle = {{x, y}, f32(width), f32(height)};
+						raylib.ImageDraw(&parentImage, image, src, dest, raylib.COLOR_WHITE);
+						raylib.UnloadImage(parentImage);
+						raylib.UnloadImage(image);
+						parentLayer := document.layers[int(celHeader.index)];
+						raylib.export_image(parentImage, fmt.tprintf("build/{1}{0}.png", parentLayer.name, frameIndex));
 						fmt.println("bytes in data", leftOver);
 					}
-					fmt.println("CEL HEADER");
-					fmt.println(celHeader);
+				}
+				case .COLOR_PROFILE: {
+					fmt.println("COLOR PROFILE");
+					profile := COLOR_PROFILE_CHUNK{};
+					fmt.println(profile, COLOR_PROFILE_TYPE(profile.type));
 				}
 				/*
 				case .CEL_EXTRA,
 				case .OLD_PALETTE:
 				case .OLD_PALETTE_2:
-				case .COLOR_PROFILE:
 				case .MASK:
 				case .TAGS:
 				case .PALETTE:
@@ -376,8 +405,10 @@ read_file :: proc(path: string) {
 				case .PATH: //never used
 				*/
 				case:
-					current += int(chunk.size - size_of(chunk));
+					fmt.println("not doing", type, int(type), frameIndex);
 			}
+
+			current = chunkStart + int(chunk.size);
 		}
 
 		current = old + int(frame.totalBytes);
