@@ -292,10 +292,19 @@ Ase_Layer :: struct {
 
 Ase_Cel :: struct {
 	layerIndex: int,
+	dataOffset: int,
+	dataLength: int,
+	width: int,
+	height: int,
+	documentWidth: int,
+	documentHeight: int,
+	type: int,
+	linkedFrameIndex: int,
+	linkedCelIndex: int,
 	x: int,
 	y: int,
 	opacity: f32,
-	data: []u8
+	image: raylib.Image
 }
 
 Ase_Frame :: struct {
@@ -319,9 +328,13 @@ Ase_Document :: struct {
 	tags: [dynamic]Ase_Tag
 }
 
-read_file :: proc(path: string) {
+
+read_file :: proc(path: string) -> ^Ase_Document{
 	data,_ := os.read_entire_file(path);
-	document : Ase_Document;
+	document := new(Ase_Document);
+	document.layers = make([dynamic]Ase_Layer);
+	document.frames = make([dynamic]Ase_Frame);
+	document.tags = make([dynamic]Ase_Tag);
 	current := 0;
 	header := ASE_HEADER{};
 	read_from_buffer(mem.ptr_to_bytes(&header), data, &current);
@@ -340,12 +353,12 @@ read_file :: proc(path: string) {
 		assert(frame.magicNumber == ASE_FRAME_HEADER_MAGIC);
 		append(&document.frames, frameData);
 		layerIndex := 0;
+		celIndex := 0;
 		for _ in 0..<frame.totalChunks {
 			chunkStart := current;
 			chunk := ASE_CHUNK_HEADER{};
 			read_from_buffer(mem.ptr_to_bytes(&chunk), data, &current);
 			type := ASE_CHUNK_TYPES(chunk.type);
-			fmt.println(chunk);
 			#partial switch type {
 				case .LAYER: {
 					layerData := ASE_LAYER_CHUNK{};
@@ -397,29 +410,47 @@ read_file :: proc(path: string) {
 					read_from_buffer(mem.ptr_to_bytes(&celHeader), data, &current);
 					x := f32(celHeader.x);
 					y := f32(celHeader.y);
-					fmt.println("CEL HEADER");
+					fmt.println("----- CEL HEADER ----");
+					fmt.println(celIndex);
 					fmt.println(celHeader);
-					if celHeader.type == 2 {
-						width := read_type(ASE_WORD, data, &current);
-						height := read_type(ASE_WORD, data, &current);
+					cel := Ase_Cel{};
+					cel.layerIndex = int(celHeader.index);
+					cel.x = int(x);
+					cel.y = int(y);
+					cel.type = int(celHeader.type);
+					width : ASE_WORD;
+					height : ASE_WORD;
+					if celHeader.type == 2 || celHeader.type == 0 {
+						width = read_type(ASE_WORD, data, &current);
+						height = read_type(ASE_WORD, data, &current);
 						fmt.println("w, h", width, height);
 						leftOver := int(chunk.size - size_of(chunk) - size_of(celHeader) - size_of(width) * 2);
 						fmt.println(chunk.size, leftOver);
-						source := data[current:current + leftOver];
-						cellData := raylib.decode_zlib(source);
-						fmt.println("total size", len(cellData));
-						fmt.println("calling raylib");
-						parentImage := raylib.GenImageColor(cast(c.int)document.width, cast(c.int)document.height, raylib.COLOR_TRANSPARENT);
-						image := raylib.LoadImagePro(&cellData[0], c.int(width), c.int(height), raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8);
-						src: raylib.Rectangle = {{0,0}, f32(width), f32(height)};
-						dest: raylib.Rectangle = {{x, y}, f32(width), f32(height)};
-						raylib.ImageDraw(&parentImage, image, src, dest, raylib.COLOR_WHITE);
-						raylib.UnloadImage(parentImage);
-						raylib.UnloadImage(image);
+						cel.width = int(width);
+						cel.height = int(height);
+						cel.documentWidth = document.width;
+						cel.documentHeight = document.height;
+						cel.dataOffset = current;
+						cel.dataLength = leftOver;
+						loadCelData(&cel, data);
 						parentLayer := document.layers[int(celHeader.index)];
-						raylib.export_image(parentImage, fmt.tprintf("build/{1}{0}.png", parentLayer.name, frameIndex));
+						raylib.export_image(cel.image, fmt.tprintf("build/{1}{0}.png", parentLayer.name, frameIndex));
 						fmt.println("bytes in data", leftOver);
+					} else if celHeader.type == 1 {
+						//linked cel copy from the previous frame.
+						linkedFrame := read_type(ASE_WORD, data, &current);
+						fmt.println("------- 1 cel type --------");
+						newCel := document.frames[linkedFrame].cels[celIndex];
+						newCel.linkedFrameIndex = int(linkedFrame);
+						newCel.linkedCelIndex = celIndex;
+						newCel.type = int(celHeader.type);
+						fmt.println(newCel);
+						fmt.println(read_type(ASE_WORD, data, &current));
+						cel = newCel;
 					}
+					frame := &document.frames[frameIndex];
+					append(&frame.cels, cel);
+					celIndex += 1;
 				}
 				case .COLOR_PROFILE: {
 					fmt.println("COLOR PROFILE");
@@ -461,6 +492,45 @@ read_file :: proc(path: string) {
 		current = old + int(frame.totalBytes);
 	}
 	fmt.println("done", document);
+	
+	return document;
+}
+
+destroy :: proc(document: ^Ase_Document) {
+	for frame in document.frames {
+		delete(frame.cels);
+	}
+	delete(document.frames);
+	delete(document.layers);
+	delete(document.tags);
+
+	free(document);
+}
+
+loadCelData :: proc(cel: ^Ase_Cel, data: []byte) {
+	source := data[cel.dataOffset : cel.dataOffset + cel.dataLength];
+	cellData : []byte;
+	if cel.type == 2 {
+		cellData = raylib.decode_zlib(source);
+	}
+	if cel.type == 0 {
+		cellData = source;
+	}
+
+	if cel.type == 1 {
+		return;
+	}
+
+	fmt.println("total size", len(cellData));
+	fmt.println("calling raylib");
+	parentImage := raylib.GenImageColor(cast(c.int)cel.documentWidth, cast(c.int)cel.documentHeight, raylib.COLOR_TRANSPARENT);
+	image := raylib.LoadImagePro(&cellData[0], c.int(cel.width), c.int(cel.height), raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8);
+	src: raylib.Rectangle = {{0,0}, f32(cel.width), f32(cel.height)};
+	dest: raylib.Rectangle = {{cast(f32)cel.x, cast(f32)cel.y}, f32(cel.width), f32(cel.height)};
+	raylib.ImageDraw(&parentImage, image, src, dest, raylib.COLOR_WHITE);
+	raylib.UnloadImage(image);
+
+	cel.image = parentImage;
 }
 
 read_ase_string :: proc(data: []byte, current_pos: ^int) -> string {
