@@ -225,8 +225,8 @@ TAGS_CHUNK_DATA :: struct #packed {
 	direction: ASE_ANIMTION_DIRECTION,
 	reserved: [8]ASE_BYTE,
 	tagColor: [3]ASE_BYTE, //who cares
-	pad: ASE_BYTE,
-	name: ASE_STRING
+	pad: ASE_BYTE
+	//Also has name
 }
 
 PALETTE_CHUNK_HEADER :: struct #packed {
@@ -286,7 +286,8 @@ SLICE_CHUNK_DATA_BIT_2 :: struct #packed {
 Ase_Layer :: struct {
 	index: int,
 	name: string,
-	groupPath: []string
+	type: ASE_LAYER_CHUNK_TYPE,
+	groupPath: []int
 }
 
 Ase_Cel :: struct {
@@ -323,22 +324,28 @@ read_file :: proc(path: string) {
 	document : Ase_Document;
 	current := 0;
 	header := ASE_HEADER{};
-	frame := ASE_FRAME_HEADER{};
 	read_from_buffer(mem.ptr_to_bytes(&header), data, &current);
+	document.header = header;
 	document.width = int(header.width);
 	document.height = int(header.height);
 	fmt.println(header);
+	assert(header.magicNumber == ASE_HEADER_MAGIC);
 	for frameIndex in 0..<header.frames {
 		old := current;
+		frame := ASE_FRAME_HEADER{};
 		read_from_buffer(mem.ptr_to_bytes(&frame), data, &current);
-		fmt.println(frame);
+		frameData : Ase_Frame = {
+			duration=int(frame.frameDuration)
+		};
+		assert(frame.magicNumber == ASE_FRAME_HEADER_MAGIC);
+		append(&document.frames, frameData);
+		layerIndex := 0;
 		for _ in 0..<frame.totalChunks {
 			chunkStart := current;
 			chunk := ASE_CHUNK_HEADER{};
 			read_from_buffer(mem.ptr_to_bytes(&chunk), data, &current);
 			type := ASE_CHUNK_TYPES(chunk.type);
 			fmt.println(chunk);
-			layerIndex := 0;
 			#partial switch type {
 				case .LAYER: {
 					layerData := ASE_LAYER_CHUNK{};
@@ -349,10 +356,36 @@ read_file :: proc(path: string) {
 					name := strings.clone(strings.string_from_ptr(&layerName[0], int(layerData.nameLen)));
 					fmt.println(transmute(ASE_LAYER_CHUNK_FLAGS)layerData.flags, layerData.flags, ASE_LAYER_CHUNK_TYPE(layerData.type));
 
+
 					layer : Ase_Layer = {
 						index=layerIndex,
 						name=name,
+
+						type = ASE_LAYER_CHUNK_TYPE(layerData.type)
 					};
+
+
+					path := make([dynamic]int);
+					fmt.println("child level", layerData.childLevel, layer.type);
+					if layerData.childLevel > 0 {
+						lastLayerIndex := layerIndex - 1;
+						fmt.println("lasy layer", lastLayerIndex);
+						if lastLayerIndex >= 0 {
+							lastLayer := document.layers[lastLayerIndex];
+							for pathIndex in 0..<int(layerData.childLevel) {
+								if len(lastLayer.groupPath) > pathIndex {
+									fmt.println("moving into our thing", lastLayer);
+									append(&path, lastLayer.groupPath[pathIndex]);
+								}
+							}
+						}
+					}
+
+					append(&path, layerIndex);
+
+					layer.groupPath = path[:];
+
+					fmt.println(path);
 
 					append(&document.layers, layer);
 
@@ -393,19 +426,33 @@ read_file :: proc(path: string) {
 					profile := COLOR_PROFILE_CHUNK{};
 					fmt.println(profile, COLOR_PROFILE_TYPE(profile.type));
 				}
+
+				case .TAGS: {
+					fmt.println("----- TAGS CHUNK -----");
+					tagsHeader := read_type(TAGS_CHUNK_HEADER, data, &current);
+					fmt.println("total tags", tagsHeader.tagCount);
+
+					for _ in 0..<tagsHeader.tagCount {
+						tagInfo := read_type(TAGS_CHUNK_DATA, data, &current);
+						name := read_ase_string(data, &current);
+						tag := Ase_Tag{name=name, fromFrame=int(tagInfo.fromFrame), toFrame=int(tagInfo.toFrame)};
+						append(&document.tags, tag);
+						fmt.println(tagInfo);
+						fmt.println(name);
+					}
+				}
 				/*
 				case .CEL_EXTRA,
 				case .OLD_PALETTE:
 				case .OLD_PALETTE_2:
 				case .MASK:
-				case .TAGS:
 				case .PALETTE:
 				case .USER_DATA: 
 				case .SLICE:
 				case .PATH: //never used
 				*/
 				case:
-					fmt.println("not doing", type, int(type), frameIndex);
+				fmt.println("not doing", type, int(type), frameIndex);
 			}
 
 			current = chunkStart + int(chunk.size);
@@ -413,7 +460,17 @@ read_file :: proc(path: string) {
 
 		current = old + int(frame.totalBytes);
 	}
-	fmt.println("done");
+	fmt.println("done", document);
+}
+
+read_ase_string :: proc(data: []byte, current_pos: ^int) -> string {
+	size := read_type(ASE_WORD, data, current_pos);
+	buff := make([]byte, int(size));
+	read_from_buffer(buff, data, current_pos);
+
+	result := strings.clone(strings.string_from_ptr(&buff[0], int(size)));
+	delete(buff);
+	return result;
 }
 
 read_from_buffer :: proc(dest: []byte, source: []byte, current_pos: ^int) -> bool {
@@ -428,7 +485,7 @@ read_from_buffer :: proc(dest: []byte, source: []byte, current_pos: ^int) -> boo
 
 read_type :: proc($T: typeid, data: []byte, current_pos: ^int) -> T {
 	type: T;
-	
+
 	read_from_buffer(mem.ptr_to_bytes(&type), data, current_pos);
 
 	return type;
