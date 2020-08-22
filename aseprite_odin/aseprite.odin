@@ -299,6 +299,8 @@ Ase_Cel :: struct {
 	documentWidth: int,
 	documentHeight: int,
 	type: int,
+	frameIndex: int,
+	celIndex: int,
 	linkedFrameIndex: int,
 	linkedCelIndex: int,
 	x: int,
@@ -328,9 +330,15 @@ Ase_Document :: struct {
 	tags: [dynamic]Ase_Tag
 }
 
+read_file :: proc (path: string) -> (^Ase_Document, bool) {
+	data, loaded := os.read_entire_file(path);
+	if !loaded {
+		return nil, false;
+	}
 
-read_file :: proc(path: string) -> ^Ase_Document{
-	data,_ := os.read_entire_file(path);
+	return load_from_buffer(data);
+}
+load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 	document := new(Ase_Document);
 	document.layers = make([dynamic]Ase_Layer);
 	document.frames = make([dynamic]Ase_Frame);
@@ -432,10 +440,6 @@ read_file :: proc(path: string) -> ^Ase_Document{
 						cel.documentHeight = document.height;
 						cel.dataOffset = current;
 						cel.dataLength = leftOver;
-						loadCelData(&cel, data);
-						parentLayer := document.layers[int(celHeader.index)];
-						raylib.export_image(cel.image, fmt.tprintf("build/{1}{0}.png", parentLayer.name, frameIndex));
-						fmt.println("bytes in data", leftOver);
 					} else if celHeader.type == 1 {
 						//linked cel copy from the previous frame.
 						linkedFrame := read_type(ASE_WORD, data, &current);
@@ -448,6 +452,8 @@ read_file :: proc(path: string) -> ^Ase_Document{
 						fmt.println(read_type(ASE_WORD, data, &current));
 						cel = newCel;
 					}
+					cel.frameIndex = int(frameIndex);
+					cel.celIndex = int(celIndex);
 					frame := &document.frames[frameIndex];
 					append(&frame.cels, cel);
 					celIndex += 1;
@@ -493,7 +499,7 @@ read_file :: proc(path: string) -> ^Ase_Document{
 	}
 	fmt.println("done", document);
 	
-	return document;
+	return document, true;
 }
 
 destroy :: proc(document: ^Ase_Document) {
