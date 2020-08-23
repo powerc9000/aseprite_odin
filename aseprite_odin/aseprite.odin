@@ -303,6 +303,7 @@ Ase_Cel :: struct {
 	celIndex: int,
 	linkedFrameIndex: int,
 	linkedCelIndex: int,
+	linkedCel: ^Ase_Cel,
 	x: int,
 	y: int,
 	opacity: f32,
@@ -426,8 +427,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 						leftOver := int(chunk.size - size_of(chunk) - size_of(celHeader) - size_of(width) * 2);
 						cel.width = int(width);
 						cel.height = int(height);
-						cel.documentWidth = document.width;
-						cel.documentHeight = document.height;
 						cel.dataOffset = current;
 						cel.dataLength = leftOver;
 					} else if celHeader.type == 1 {
@@ -437,8 +436,11 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 						newCel.linkedFrameIndex = int(linkedFrame);
 						newCel.linkedCelIndex = celIndex;
 						newCel.type = int(celHeader.type);
+						newCel.linkedCel = &document.frames[int(linkedFrame)].cels[celIndex];
 						cel = newCel;
 					}
+					cel.documentWidth = document.width;
+					cel.documentHeight = document.height;
 					cel.frameIndex = int(frameIndex);
 					cel.celIndex = int(celIndex);
 					frame := &document.frames[frameIndex];
