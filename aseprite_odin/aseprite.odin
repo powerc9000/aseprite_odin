@@ -311,6 +311,7 @@ Ase_Cel :: struct {
 
 Ase_Frame :: struct {
 	duration: int,
+	index: int,
 	cels: [dynamic]Ase_Cel,
 	tags: []int
 }
@@ -349,14 +350,14 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 	document.header = header;
 	document.width = int(header.width);
 	document.height = int(header.height);
-	fmt.println(header);
 	assert(header.magicNumber == ASE_HEADER_MAGIC);
 	for frameIndex in 0..<header.frames {
 		old := current;
 		frame := ASE_FRAME_HEADER{};
 		read_from_buffer(mem.ptr_to_bytes(&frame), data, &current);
 		frameData : Ase_Frame = {
-			duration=int(frame.frameDuration)
+			duration=int(frame.frameDuration),
+			index=int(frameIndex)
 		};
 		assert(frame.magicNumber == ASE_FRAME_HEADER_MAGIC);
 		append(&document.frames, frameData);
@@ -373,9 +374,7 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					read_from_buffer(mem.ptr_to_bytes(&layerData), data, &current);
 					layerName := make([]ASE_BYTE, layerData.nameLen);
 					read_from_buffer(layerName, data, &current);
-					fmt.println("Layer Chunk", int(layerData.nameLen));
 					name := strings.clone(strings.string_from_ptr(&layerName[0], int(layerData.nameLen)));
-					fmt.println(transmute(ASE_LAYER_CHUNK_FLAGS)layerData.flags, layerData.flags, ASE_LAYER_CHUNK_TYPE(layerData.type));
 
 
 					layer : Ase_Layer = {
@@ -387,15 +386,12 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 
 
 					path := make([dynamic]int);
-					fmt.println("child level", layerData.childLevel, layer.type);
 					if layerData.childLevel > 0 {
 						lastLayerIndex := layerIndex - 1;
-						fmt.println("lasy layer", lastLayerIndex);
 						if lastLayerIndex >= 0 {
 							lastLayer := document.layers[lastLayerIndex];
 							for pathIndex in 0..<int(layerData.childLevel) {
 								if len(lastLayer.groupPath) > pathIndex {
-									fmt.println("moving into our thing", lastLayer);
 									append(&path, lastLayer.groupPath[pathIndex]);
 								}
 							}
@@ -406,7 +402,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 
 					layer.groupPath = path[:];
 
-					fmt.println(path);
 
 					append(&document.layers, layer);
 
@@ -418,9 +413,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					read_from_buffer(mem.ptr_to_bytes(&celHeader), data, &current);
 					x := f32(celHeader.x);
 					y := f32(celHeader.y);
-					fmt.println("----- CEL HEADER ----");
-					fmt.println(celIndex);
-					fmt.println(celHeader);
 					cel := Ase_Cel{};
 					cel.layerIndex = int(celHeader.index);
 					cel.x = int(x);
@@ -431,9 +423,7 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					if celHeader.type == 2 || celHeader.type == 0 {
 						width = read_type(ASE_WORD, data, &current);
 						height = read_type(ASE_WORD, data, &current);
-						fmt.println("w, h", width, height);
 						leftOver := int(chunk.size - size_of(chunk) - size_of(celHeader) - size_of(width) * 2);
-						fmt.println(chunk.size, leftOver);
 						cel.width = int(width);
 						cel.height = int(height);
 						cel.documentWidth = document.width;
@@ -443,13 +433,10 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					} else if celHeader.type == 1 {
 						//linked cel copy from the previous frame.
 						linkedFrame := read_type(ASE_WORD, data, &current);
-						fmt.println("------- 1 cel type --------");
 						newCel := document.frames[linkedFrame].cels[celIndex];
 						newCel.linkedFrameIndex = int(linkedFrame);
 						newCel.linkedCelIndex = celIndex;
 						newCel.type = int(celHeader.type);
-						fmt.println(newCel);
-						fmt.println(read_type(ASE_WORD, data, &current));
 						cel = newCel;
 					}
 					cel.frameIndex = int(frameIndex);
@@ -459,23 +446,17 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					celIndex += 1;
 				}
 				case .COLOR_PROFILE: {
-					fmt.println("COLOR PROFILE");
 					profile := COLOR_PROFILE_CHUNK{};
-					fmt.println(profile, COLOR_PROFILE_TYPE(profile.type));
 				}
 
 				case .TAGS: {
-					fmt.println("----- TAGS CHUNK -----");
 					tagsHeader := read_type(TAGS_CHUNK_HEADER, data, &current);
-					fmt.println("total tags", tagsHeader.tagCount);
 
 					for _ in 0..<tagsHeader.tagCount {
 						tagInfo := read_type(TAGS_CHUNK_DATA, data, &current);
 						name := read_ase_string(data, &current);
 						tag := Ase_Tag{name=name, fromFrame=int(tagInfo.fromFrame), toFrame=int(tagInfo.toFrame)};
 						append(&document.tags, tag);
-						fmt.println(tagInfo);
-						fmt.println(name);
 					}
 				}
 				/*
@@ -489,7 +470,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 				case .PATH: //never used
 				*/
 				case:
-				fmt.println("not doing", type, int(type), frameIndex);
 			}
 
 			current = chunkStart + int(chunk.size);
@@ -497,7 +477,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 
 		current = old + int(frame.totalBytes);
 	}
-	fmt.println("done", document);
 	
 	return document, true;
 }
@@ -527,8 +506,6 @@ loadCelData :: proc(cel: ^Ase_Cel, data: []byte) {
 		return;
 	}
 
-	fmt.println("total size", len(cellData));
-	fmt.println("calling raylib");
 	parentImage := raylib.GenImageColor(cast(c.int)cel.documentWidth, cast(c.int)cel.documentHeight, raylib.COLOR_TRANSPARENT);
 	image := raylib.LoadImagePro(&cellData[0], c.int(cel.width), c.int(cel.height), raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8);
 	src: raylib.Rectangle = {{0,0}, f32(cel.width), f32(cel.height)};
