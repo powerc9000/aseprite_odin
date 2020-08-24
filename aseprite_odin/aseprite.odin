@@ -314,7 +314,7 @@ Ase_Frame :: struct {
 	duration: int,
 	index: int,
 	cels: [dynamic]Ase_Cel,
-	tags: []int
+	tags: [dynamic]string
 }
 
 Ase_Tag :: struct {
@@ -453,7 +453,7 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 
 				case .TAGS: {
 					tagsHeader := read_type(TAGS_CHUNK_HEADER, data, &current);
-
+					fmt.println("tag header", tagsHeader);
 					for _ in 0..<tagsHeader.tagCount {
 						tagInfo := read_type(TAGS_CHUNK_DATA, data, &current);
 						name := read_ase_string(data, &current);
@@ -478,6 +478,12 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 		}
 
 		current = old + int(frame.totalBytes);
+	}
+
+	for tag in document.tags {
+		for frameIndex in tag.fromFrame..< tag.toFrame + 1 {
+			append(&document.frames[frameIndex].tags, tag.name);
+		}
 	}
 	
 	return document, true;
