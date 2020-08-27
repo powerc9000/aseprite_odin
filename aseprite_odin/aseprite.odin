@@ -453,7 +453,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 
 				case .TAGS: {
 					tagsHeader := read_type(TAGS_CHUNK_HEADER, data, &current);
-					fmt.println("tag header", tagsHeader);
 					for _ in 0..<tagsHeader.tagCount {
 						tagInfo := read_type(TAGS_CHUNK_DATA, data, &current);
 						name := read_ase_string(data, &current);
