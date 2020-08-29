@@ -7,13 +7,6 @@ import "core:strings"
 import "core:c";
 import raylib "../raylib_odin/raylib_defs";
 
-foreign import miniz "../clibs/miniz.o";
-
-foreign miniz {
-	tinfl_decompress_mem_to_heap :: proc(rawptr, c.size_t, ^c.size_t, c.int) -> rawptr ---;
-	mz_free :: proc(rawptr) ---;
-}
-
 ASE_BYTE :: u8;
 ASE_WORD :: u16le;
 ASE_SHORT :: i16le;
@@ -236,7 +229,7 @@ PALETTE_CHUNK_HEADER :: struct #packed {
 	reserved: [8]ASE_BYTE
 };
 
-PALLET_CHUNK_DATA :: struct #packed {
+PALETTE_CHUNK_DATA :: struct #packed {
 	flags: ASE_WORD,
 	red: ASE_BYTE,
 	green: ASE_BYTE,
@@ -294,6 +287,9 @@ Ase_Cel :: struct {
 	layerIndex: int,
 	dataOffset: int,
 	dataLength: int,
+	colorDepth: Ase_Color_Depth,
+	transparentIndex: u8,
+	palette: []ASE_PIXEL_RGBA,
 	width: int,
 	height: int,
 	documentWidth: int,
@@ -323,9 +319,16 @@ Ase_Tag :: struct {
 	toFrame: int
 }
 
+Ase_Color_Depth :: enum {
+	Indexed = 8,
+	Grayscale = 16,
+	RGBA = 32
+}
+
 Ase_Document :: struct {
 	width: int,
 	height: int,
+	colorDepth: Ase_Color_Depth,
 	header: ASE_HEADER,
 	layers: [dynamic]Ase_Layer,
 	frames: [dynamic]Ase_Frame,
@@ -351,6 +354,8 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 	document.header = header;
 	document.width = int(header.width);
 	document.height = int(header.height);
+	document.colorDepth = Ase_Color_Depth(header.depth);
+	palette: [256]ASE_PIXEL_RGBA = {};
 	assert(header.magicNumber == ASE_HEADER_MAGIC);
 	for frameIndex in 0..<header.frames {
 		old := current;
@@ -419,6 +424,11 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					cel.x = int(x);
 					cel.y = int(y);
 					cel.type = int(celHeader.type);
+					cel.colorDepth = document.colorDepth;
+					celPalette := make([]ASE_PIXEL_RGBA, len(palette));
+					mem.copy(&celPalette[0], &palette[0], len(celPalette));
+					cel.palette = celPalette;
+					cel.transparentIndex = u8(header.transparentColorIndex);
 					width : ASE_WORD;
 					height : ASE_WORD;
 					if celHeader.type == 2 || celHeader.type == 0 {
@@ -460,12 +470,24 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 						append(&document.tags, tag);
 					}
 				}
+
+				case .PALETTE: {
+					header := read_type(PALETTE_CHUNK_HEADER, data, &current);
+
+					for paletteIndex in header.firstIndex..<header.lastIndex + 1 {
+						entry := read_type(PALETTE_CHUNK_DATA, data, &current);
+						paletteEntry := &palette[paletteIndex];
+						paletteEntry.r = entry.red;
+						paletteEntry.g = entry.green;
+						paletteEntry.b = entry.blue;
+						paletteEntry.a = entry.alpha;
+					}
+				}
 				/*
 				case .CEL_EXTRA,
 				case .OLD_PALETTE:
 				case .OLD_PALETTE_2:
 				case .MASK:
-				case .PALETTE:
 				case .USER_DATA: 
 				case .SLICE:
 				case .PATH: //never used
@@ -489,7 +511,15 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 }
 
 destroy :: proc(document: ^Ase_Document) {
+	if document == nil {
+		return;
+	}
 	for frame in document.frames {
+		for cel in frame.cels {
+			if cel.palette != nil {
+				delete(cel.palette);
+			}
+		}
 		delete(frame.cels);
 	}
 	delete(document.frames);
@@ -497,11 +527,16 @@ destroy :: proc(document: ^Ase_Document) {
 	delete(document.tags);
 
 	free(document);
+	
 }
 
-loadCelData :: proc(cel: ^Ase_Cel, data: []byte) {
+loadCelData :: proc(cel: ^Ase_Cel, data: []byte) -> bool{
 	source := data[cel.dataOffset : cel.dataOffset + cel.dataLength];
 	cellData : []byte;
+	pixelFormat := raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8;
+	defer if cellData != nil {
+		delete(cellData);
+	}
 	if cel.type == 2 {
 		cellData = raylib.decode_zlib(source);
 	}
@@ -510,17 +545,47 @@ loadCelData :: proc(cel: ^Ase_Cel, data: []byte) {
 	}
 
 	if cel.type == 1 {
-		return;
+		return true;
+	}
+	if cel.colorDepth == .Indexed {
+		if cel.palette == nil {
+			return false;
+		}
+		newCelData := make([]byte, len(cellData) * 4);
+		for colorIndex, dataIndex in cellData {
+			color := cel.palette[colorIndex];
+			newCelIndex := dataIndex * 4;
+			newCelData[newCelIndex] = color.r;
+			newCelData[newCelIndex + 1] = color.g;
+			newCelData[newCelIndex + 2] = color.b;
+			if colorIndex == cel.transparentIndex {
+				color.a = 0;
+			} else {
+				newCelData[newCelIndex + 3] = color.a;
+			}
+			
+		}
+		delete(cellData);
+		cellData = newCelData;
 	}
 
+	if cel.colorDepth == .Grayscale {
+		pixelFormat = .UNCOMPRESSED_GRAY_ALPHA;
+
+	}
+
+
 	parentImage := raylib.GenImageColor(cast(c.int)cel.documentWidth, cast(c.int)cel.documentHeight, raylib.COLOR_TRANSPARENT);
-	image := raylib.LoadImagePro(&cellData[0], c.int(cel.width), c.int(cel.height), raylib.PixelFormat.UNCOMPRESSED_R8G8B8A8);
+	image := raylib.LoadImagePro(&cellData[0], c.int(cel.width), c.int(cel.height), pixelFormat);
 	src: raylib.Rectangle = {{0,0}, f32(cel.width), f32(cel.height)};
 	dest: raylib.Rectangle = {{cast(f32)cel.x, cast(f32)cel.y}, f32(cel.width), f32(cel.height)};
 	raylib.ImageDraw(&parentImage, image, src, dest, raylib.COLOR_WHITE);
 	raylib.UnloadImage(image);
 
+
 	cel.image = parentImage;
+
+	return true;
 }
 
 read_ase_string :: proc(data: []byte, current_pos: ^int) -> string {
