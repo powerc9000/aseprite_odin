@@ -427,7 +427,6 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 					cel.colorDepth = document.colorDepth;
 					celPalette := make([]ASE_PIXEL_RGBA, len(palette));
 					mem.copy(&celPalette[0], &palette[0], len(celPalette));
-					cel.palette = celPalette;
 					cel.transparentIndex = u8(header.transparentColorIndex);
 					width : ASE_WORD;
 					height : ASE_WORD;
@@ -449,6 +448,7 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 						newCel.linkedCel = &document.frames[int(linkedFrame)].cels[celIndex];
 						cel = newCel;
 					}
+					cel.palette = celPalette;
 					cel.documentWidth = document.width;
 					cel.documentHeight = document.height;
 					cel.frameIndex = int(frameIndex);
@@ -514,12 +514,14 @@ destroy :: proc(document: ^Ase_Document) {
 	if document == nil {
 		return;
 	}
-	for frame in document.frames {
-		for cel in frame.cels {
+	for frame in &document.frames {
+		for cel in &frame.cels {
 			if cel.palette != nil {
 				delete(cel.palette);
+				cel.palette = nil;
 			}
 		}
+		fmt.println("freeing cels", frame.cels);
 		delete(frame.cels);
 	}
 	delete(document.frames);
@@ -527,7 +529,7 @@ destroy :: proc(document: ^Ase_Document) {
 	delete(document.tags);
 
 	free(document);
-	
+
 }
 
 loadCelData :: proc(cel: ^Ase_Cel, data: []byte) -> bool{
