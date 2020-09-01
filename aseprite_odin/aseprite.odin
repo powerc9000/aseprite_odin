@@ -521,7 +521,6 @@ destroy :: proc(document: ^Ase_Document) {
 				cel.palette = nil;
 			}
 		}
-		fmt.println("freeing cels", frame.cels);
 		delete(frame.cels);
 	}
 	delete(document.frames);
