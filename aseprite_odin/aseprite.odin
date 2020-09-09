@@ -356,7 +356,9 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 	document.height = int(header.height);
 	document.colorDepth = Ase_Color_Depth(header.depth);
 	palette: [256]ASE_PIXEL_RGBA = {};
-	assert(header.magicNumber == ASE_HEADER_MAGIC);
+	if header.magicNumber != ASE_HEADER_MAGIC {
+		return nil, false;
+	}
 	for frameIndex in 0..<header.frames {
 		old := current;
 		frame := ASE_FRAME_HEADER{};
@@ -365,7 +367,9 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 			duration=int(frame.frameDuration),
 			index=int(frameIndex)
 		};
-		assert(frame.magicNumber == ASE_FRAME_HEADER_MAGIC);
+		if frame.magicNumber != ASE_FRAME_HEADER_MAGIC {
+			return nil, false;
+		}
 		append(&document.frames, frameData);
 		layerIndex := 0;
 		celIndex := 0;
