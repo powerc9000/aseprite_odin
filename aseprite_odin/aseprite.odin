@@ -576,12 +576,19 @@ loadCelData :: proc(cel: ^Ase_Cel, data: []byte) -> bool{
 
 	if cel.colorDepth == .Grayscale {
 		pixelFormat = .UNCOMPRESSED_GRAY_ALPHA;
-
 	}
 
 
 	parentImage := raylib.GenImageColor(cast(c.int)cel.documentWidth, cast(c.int)cel.documentHeight, raylib.COLOR_TRANSPARENT);
-	image := raylib.LoadImagePro(&cellData[0], c.int(cel.width), c.int(cel.height), pixelFormat);
+	fakeImage := raylib.Image {
+		width=i32(cel.width),
+		height=i32(cel.height),
+		data=&cellData[0],
+		mipmaps=1,
+		format=i32(pixelFormat)
+	};
+	image := raylib.ImageCopy(fakeImage);
+	//image := raylib.LoadImageFromMemory(".bmp", &cellData[0], i32(cel.width* cel.height));
 	src: raylib.Rectangle = {{0,0}, f32(cel.width), f32(cel.height)};
 	dest: raylib.Rectangle = {{cast(f32)cel.x, cast(f32)cel.y}, f32(cel.width), f32(cel.height)};
 	raylib.ImageDraw(&parentImage, image, src, dest, raylib.COLOR_WHITE);
