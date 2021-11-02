@@ -5,7 +5,7 @@ import "core:mem";
 import "core:fmt";
 import "core:strings"
 import "core:c";
-import raylib "../raylib_odin/raylib_defs";
+import raylib "../raylib";
 
 ASE_BYTE :: u8;
 ASE_WORD :: u16le;
@@ -15,24 +15,24 @@ ASE_LONG :: i32le;
 
 ASE_FIXED :: struct #packed{
 	hi: ASE_WORD,
-	lo: ASE_WORD
+	lo: ASE_WORD,
 };
 
 ASE_STRING :: struct #packed {
 	len: ASE_WORD,
-	chars: []ASE_BYTE
+	chars: []ASE_BYTE,
 };
 
 ASE_PIXEL_RGBA :: struct #packed { 
 	r: ASE_BYTE,
 	g: ASE_BYTE,
 	b: ASE_BYTE,
-	a: ASE_BYTE
+	a: ASE_BYTE,
 };
 
 ASE_PIXEL_GRAYSCALE :: struct #packed {
 	value: ASE_BYTE,
-	alpha: ASE_BYTE
+	alpha: ASE_BYTE,
 };
 
 ASE_PIXEL_INDEXED :: distinct ASE_BYTE;
@@ -57,7 +57,7 @@ ASE_HEADER :: struct #packed {
 	gridY: ASE_SHORT,
 	gridWidth: ASE_WORD,
 	gridHeight: ASE_WORD,
-	reserved: [84]ASE_BYTE
+	reserved: [84]ASE_BYTE,
 };
 
 ASE_FRAME_HEADER :: struct #packed {
@@ -66,13 +66,13 @@ ASE_FRAME_HEADER :: struct #packed {
 	_totalChunks: ASE_WORD,
 	frameDuration: ASE_WORD,
 	reserved: [2]ASE_BYTE,
-	totalChunks: ASE_DWORD
+	totalChunks: ASE_DWORD,
 };
 
 
 ASE_CHUNK_HEADER :: struct #packed {
 	size: ASE_DWORD,
-	type: ASE_WORD
+	type: ASE_WORD,
 };
 
 ASE_FRAME_HEADER_MAGIC : ASE_WORD : 0xF1FA;
@@ -90,7 +90,7 @@ ASE_CHUNK_TYPES :: enum ASE_WORD {
 	TAGS = 0x2018,
 	PALETTE = 0x2019,
 	USER_DATA = 0x2020,
-	SLICE = 0x2022
+	SLICE = 0x2022,
 };
 
 ASE_BLEND_MDOE :: enum ASE_WORD {
@@ -112,7 +112,7 @@ ASE_BLEND_MDOE :: enum ASE_WORD {
 	Luminosity     = 15,
 	Addition       = 16,
 	Subtract       = 17,
-	Divide         = 18
+	Divide         = 18,
 };
 
 
@@ -125,14 +125,14 @@ ASE_LAYER_CHUNK :: struct #packed {
 	blendMode: ASE_WORD,
 	opacity: ASE_BYTE,
 	reserved: [3]ASE_BYTE,
-	nameLen: ASE_WORD
+	nameLen: ASE_WORD,
 };
 
 ASE_LAYER_CHUNK_NAME :: ASE_STRING;
 
 ASE_LAYER_CHUNK_TYPE :: enum ASE_WORD {
 	Normal,
-	Group
+	Group,
 }
 ASE_LAYER_CHUNK_FLAGS_INFO :: enum ASE_WORD {
 	Visible,
@@ -141,7 +141,7 @@ ASE_LAYER_CHUNK_FLAGS_INFO :: enum ASE_WORD {
 	Background,
 	PreferLinkedCels, 
 	Collapsed,
-	ReferenceLayer
+	ReferenceLayer,
 }
 ASE_LAYER_CHUNK_FLAGS :: bit_set[ASE_LAYER_CHUNK_FLAGS_INFO; ASE_WORD];
 
@@ -151,12 +151,12 @@ CEL_CHUNK_HEADER :: struct #packed {
 	y: ASE_SHORT,
 	opacity: ASE_BYTE,
 	type: ASE_WORD,
-	reserved: [7]byte
+	reserved: [7]byte,
 };
 
 CEL_CHUNK_RAW_CEL :: struct #packed {
 	width: ASE_WORD,
-	height: ASE_WORD
+	height: ASE_WORD,
 	//Also has Pixel array but that will vary based on color depth
 };
 
@@ -165,7 +165,7 @@ CEL_CHUNK_LINKED_CEL :: distinct ASE_WORD;
 CEL_CHUNK_COMPRESSED_IMAGE :: struct #packed {
 	width: ASE_WORD,
 	height: ASE_WORD,
-	data: []ASE_BYTE // zlib compressed
+	data: []ASE_BYTE, // zlib compressed
 };
 
 CEL_EXTRA_CHUNK :: struct #packed {
@@ -174,20 +174,20 @@ CEL_EXTRA_CHUNK :: struct #packed {
 	y: ASE_FIXED,
 	width: ASE_FIXED,
 	height: ASE_FIXED,
-	reserved: [16]ASE_BYTE
+	reserved: [16]ASE_BYTE,
 };
 
 COLOR_PROFILE_TYPE :: enum ASE_WORD {
 	None = 0,
 	SRGB = 1,
-	Embedded = 2
+	Embedded = 2,
 }
 
 COLOR_PROFILE_CHUNK :: struct #packed {
 	type: COLOR_PROFILE_TYPE,
 	flags: ASE_WORD,
 	fixedGamma: ASE_FIXED,
-	reserved: [8]byte
+	reserved: [8]byte,
 	// Will have ICC color profile if type is icc
 };
 
@@ -198,18 +198,18 @@ MASK_CHUNK :: struct #packed {
 	height: ASE_WORD,
 	reserved: [8]byte,
 	name: ASE_STRING,
-	bitMapData: []ASE_BYTE //(size = height * ((width+7)/8))
+	bitMapData: []ASE_BYTE, //(size = height * ((width+7)/8)),
 };
 
 TAGS_CHUNK_HEADER :: struct #packed {
 	tagCount: ASE_WORD,
-	reserved: [8]ASE_BYTE
+	reserved: [8]ASE_BYTE,
 };
 
 ASE_ANIMTION_DIRECTION :: enum ASE_BYTE {
 	Forward = 0,
 	Reverse = 1,
-	PingPong = 2
+	PingPong = 2,
 }
 
 TAGS_CHUNK_DATA :: struct #packed {
@@ -218,7 +218,7 @@ TAGS_CHUNK_DATA :: struct #packed {
 	direction: ASE_ANIMTION_DIRECTION,
 	reserved: [8]ASE_BYTE,
 	tagColor: [3]ASE_BYTE, //who cares
-	pad: ASE_BYTE
+	pad: ASE_BYTE,
 	//Also has name
 }
 
@@ -226,7 +226,7 @@ PALETTE_CHUNK_HEADER :: struct #packed {
 	size: ASE_DWORD,
 	firstIndex: ASE_DWORD,
 	lastIndex: ASE_DWORD,
-	reserved: [8]ASE_BYTE
+	reserved: [8]ASE_BYTE,
 };
 
 PALETTE_CHUNK_DATA :: struct #packed {
@@ -238,7 +238,7 @@ PALETTE_CHUNK_DATA :: struct #packed {
 };
 
 USER_DATA_CHUNK :: struct #packed {
-	flags: ASE_DWORD
+	flags: ASE_DWORD,
 };
 
 USER_DATA_CHUNK_FLAGS_BIT_1 :: ASE_STRING;
@@ -246,14 +246,14 @@ USER_DATA_CHUNK_FLAGS_BIT_2 :: struct #packed {
 	red: ASE_BYTE,
 	green: ASE_BYTE,
 	blue: ASE_BYTE,
-	alpha: ASE_BYTE
+	alpha: ASE_BYTE,
 }
 
 SLICE_CHUNK_HEADER :: struct #packed {
 	total: ASE_DWORD,
 	flags: ASE_DWORD,
 	reserved: ASE_DWORD,
-	name: ASE_STRING
+	name: ASE_STRING,
 };
 
 SLICE_CHUNK_DATA :: struct #packed {
@@ -261,26 +261,26 @@ SLICE_CHUNK_DATA :: struct #packed {
 	x: ASE_LONG,
 	y: ASE_LONG,
 	width: ASE_DWORD,
-	height: ASE_DWORD
+	height: ASE_DWORD,
 }
 
 SLICE_CHUNK_DATA_BIT_1 :: struct #packed {
 	centerX: ASE_LONG,
 	centerY: ASE_LONG,
 	centerWidth: ASE_DWORD,
-	centerHeight: ASE_DWORD
+	centerHeight: ASE_DWORD,
 };
 
 SLICE_CHUNK_DATA_BIT_2 :: struct #packed {
 	pivotX: ASE_LONG,
-	pivotY: ASE_LONG
+	pivotY: ASE_LONG,
 }
 
 Ase_Layer :: struct {
 	index: int,
 	name: string,
 	type: ASE_LAYER_CHUNK_TYPE,
-	groupPath: []int
+	groupPath: []int,
 }
 
 Ase_Cel :: struct {
@@ -303,26 +303,26 @@ Ase_Cel :: struct {
 	x: int,
 	y: int,
 	opacity: f32,
-	image: raylib.Image
+	image: raylib.Image,
 }
 
 Ase_Frame :: struct {
 	duration: int,
 	index: int,
 	cels: [dynamic]Ase_Cel,
-	tags: [dynamic]string
+	tags: [dynamic]string,
 }
 
 Ase_Tag :: struct {
 	name: string,
 	fromFrame: int,
-	toFrame: int
+	toFrame: int,
 }
 
 Ase_Color_Depth :: enum {
 	Indexed = 8,
 	Grayscale = 16,
-	RGBA = 32
+	RGBA = 32,
 }
 
 Ase_Document :: struct {
@@ -332,7 +332,7 @@ Ase_Document :: struct {
 	header: ASE_HEADER,
 	layers: [dynamic]Ase_Layer,
 	frames: [dynamic]Ase_Frame,
-	tags: [dynamic]Ase_Tag
+	tags: [dynamic]Ase_Tag,
 }
 
 read_file :: proc (path: string) -> (^Ase_Document, bool) {
@@ -365,7 +365,7 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 		read_from_buffer(mem.ptr_to_bytes(&frame), data, &current);
 		frameData : Ase_Frame = {
 			duration=int(frame.frameDuration),
-			index=int(frameIndex)
+			index=int(frameIndex),
 		};
 		if frame.magicNumber != ASE_FRAME_HEADER_MAGIC {
 			return nil, false;
@@ -391,7 +391,7 @@ load_from_buffer :: proc(data: []byte) -> (^Ase_Document, bool) {
 						index=layerIndex,
 						name=name,
 
-						type = ASE_LAYER_CHUNK_TYPE(layerData.type)
+						type = ASE_LAYER_CHUNK_TYPE(layerData.type),
 					};
 
 
@@ -585,7 +585,7 @@ loadCelData :: proc(cel: ^Ase_Cel, data: []byte) -> bool{
 		height=i32(cel.height),
 		data=&cellData[0],
 		mipmaps=1,
-		format=i32(pixelFormat)
+		format=i32(pixelFormat),
 	};
 	image := raylib.ImageCopy(fakeImage);
 	//image := raylib.LoadImageFromMemory(".bmp", &cellData[0], i32(cel.width* cel.height));
